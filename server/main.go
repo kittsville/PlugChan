@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+
+	"github.com/gorilla/websocket"
 )
 
 type plugEvent struct {
@@ -48,6 +50,23 @@ func handleInput(inputChannel chan *plugEvent, w http.ResponseWriter, r *http.Re
 	fmt.Fprint(w, "Sent")
 }
 
+var upgrader = websocket.Upgrader{} // use default options
+
+func handleOutput(inputChannel chan *plugEvent, w http.ResponseWriter, r *http.Request) {
+	c, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Print("upgrade:", err)
+		return
+	}
+	defer c.Close()
+
+	for event := range inputChannel {
+		message := fmt.Sprintf("Received plug %d event to change state to %t\n", event.plug, event.state)
+		fmt.Print(message)
+		c.WriteMessage(websocket.TextMessage, []byte(message))
+	}
+}
+
 func urlIntParam(r *http.Request, param_name string) (int, error) {
 	param_values, ok := r.URL.Query()[param_name]
 
@@ -74,10 +93,11 @@ func main() {
 	flag.Parse()
 	inputChannel := make(chan *plugEvent)
 
-	go listener(inputChannel)
-
 	http.HandleFunc("/input", func(w http.ResponseWriter, r *http.Request) {
 		handleInput(inputChannel, w, r)
+	})
+	http.HandleFunc("/output", func(w http.ResponseWriter, r *http.Request) {
+		handleOutput(inputChannel, w, r)
 	})
 	log.Printf("Listening on %s\n", *addr)
 	log.Fatal(http.ListenAndServe(*addr, nil))
