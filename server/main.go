@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -8,16 +9,12 @@ import (
 	"strconv"
 
 	"github.com/gorilla/websocket"
+	"github.com/kittsville/PlugChan/commons"
 )
-
-type plugEvent struct {
-	plug  int
-	state bool
-}
 
 var addr = flag.String("addr", "localhost:8080", "http service address")
 
-func handleInput(inputChannel chan *plugEvent, w http.ResponseWriter, r *http.Request) {
+func handleInput(inputChannel chan *commons.PlugEvent, w http.ResponseWriter, r *http.Request) {
 	plug_number, err := urlIntParam(r, "plug")
 
 	if err != nil {
@@ -42,9 +39,9 @@ func handleInput(inputChannel chan *plugEvent, w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	inputChannel <- &plugEvent{
-		plug:  plug_number,
-		state: state == 1,
+	inputChannel <- &commons.PlugEvent{
+		Plug:  plug_number,
+		State: state == 1,
 	}
 
 	fmt.Fprint(w, "Sent")
@@ -52,7 +49,7 @@ func handleInput(inputChannel chan *plugEvent, w http.ResponseWriter, r *http.Re
 
 var upgrader = websocket.Upgrader{} // use default options
 
-func handleOutput(inputChannel chan *plugEvent, w http.ResponseWriter, r *http.Request) {
+func handleOutput(inputChannel chan *commons.PlugEvent, w http.ResponseWriter, r *http.Request) {
 	c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Print("upgrade:", err)
@@ -61,9 +58,15 @@ func handleOutput(inputChannel chan *plugEvent, w http.ResponseWriter, r *http.R
 	defer c.Close()
 
 	for event := range inputChannel {
-		message := fmt.Sprintf("Received plug %d event to change state to %t\n", event.plug, event.state)
+		message := fmt.Sprintf("Received plug %d event to change state to %t\n", event.Plug, event.State)
 		fmt.Print(message)
-		c.WriteMessage(websocket.TextMessage, []byte(message))
+		eventBytes, err := json.Marshal(event)
+
+		if err != nil {
+			fmt.Println("Failed to marshal plug event JSON")
+		}
+
+		c.WriteMessage(websocket.TextMessage, eventBytes)
 	}
 }
 
@@ -83,15 +86,15 @@ func urlIntParam(r *http.Request, param_name string) (int, error) {
 	return int, nil
 }
 
-func listener(inputChannel chan *plugEvent) {
+func listener(inputChannel chan *commons.PlugEvent) {
 	for event := range inputChannel {
-		fmt.Printf("Received plug %d event to change state to %t\n", event.plug, event.state)
+		fmt.Printf("Received plug %d event to change state to %t\n", event.Plug, event.State)
 	}
 }
 
 func main() {
 	flag.Parse()
-	inputChannel := make(chan *plugEvent)
+	inputChannel := make(chan *commons.PlugEvent)
 
 	http.HandleFunc("/input", func(w http.ResponseWriter, r *http.Request) {
 		handleInput(inputChannel, w, r)
